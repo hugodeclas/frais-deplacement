@@ -178,6 +178,7 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 24px 60px; }
   </div>
   <div class="header-actions">
     <span id="airtable-badge" class="airtable-status at-off">⚡ Non configuré</span>
+    <button class="icon-btn" onclick="loadFromAirtable()" id="sync-btn" title="Synchroniser depuis Airtable">🔄</button>
     <button class="icon-btn" onclick="openModal('modal-airtable')" title="Configuration Airtable">⚙️</button>
     <button class="icon-btn" onclick="toggleTheme()" id="theme-btn" title="Changer de thème">☀️</button>
   </div>
@@ -255,6 +256,12 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 24px 60px; }
 
 <!-- ═══ STATISTIQUES ═══ -->
 <section id="tab-stats" class="tab-content">
+  <div class="filters" style="margin-bottom:16px">
+    <select id="s-filter-client" class="input" style="width:auto;min-width:180px" onchange="renderStats()">
+      <option value="Tous">Tous les clients</option>
+    </select>
+    <div class="filter-summary" id="s-summary"></div>
+  </div>
   <div id="stats-content"></div>
 </section>
 
@@ -740,17 +747,19 @@ function renderHistorique() {
   list.innerHTML = filtered.map(f => {
     const t = TYPES[f.type] || { icon: "📎", color: "#999" };
     const hasRecettes = f.recettes && f.recettes > 0;
+    const label = (f.libelle && f.libelle !== f.type) ? f.libelle : f.type;
     return `<div class="history-item">
       <div class="hi-icon" style="background:${t.color}18">${t.icon}</div>
       <div class="hi-body">
-        <div class="hi-type">${f.type}${f.moment ? ` <span style="font-size:11px;color:var(--text-muted)">(${f.moment})</span>` : ""}</div>
+        <div class="hi-type">${label}${f.moment ? ` <span style="font-size:11px;color:var(--text-muted)">(${f.moment})</span>` : ""}</div>
         <div class="hi-meta">
           <span>${fmtDate(f.date)}</span><span>·</span><span>${f.client}</span>
+          <span>·</span><span style="color:${t.color};font-weight:600;font-size:11px">${f.type}</span>
           ${f.description ? `<span>·</span><span style="font-style:italic">${f.description}</span>` : ""}
         </div>
       </div>
       <div style="text-align:right">
-        <div class="hi-amount" style="color:${t.color}">-${fmtEuro(f.montant || 0)}</div>
+        ${f.montant > 0 ? `<div class="hi-amount" style="color:${t.color}">-${fmtEuro(f.montant)}</div>` : ""}
         ${hasRecettes ? `<div style="font-size:11px;color:var(--success);font-weight:600;font-family:'JetBrains Mono',monospace">+${fmtEuro(f.recettes)}</div>` : ""}
       </div>
       <button class="btn-delete" onclick="deleteFrais('${f.id}')" title="Supprimer">✕</button>
@@ -777,26 +786,46 @@ function initHistoriqueFilters() {
 
 // ─── STATS ───
 function renderStats() {
-  const repas = frais.filter(f => f.type === "Repas");
+  // Populate client filter
+  const selC = document.getElementById("s-filter-client");
+  const currentFilter = selC.value;
+  selC.innerHTML = '<option value="Tous">Tous les clients</option>';
+  const allClients = [...new Set(frais.map(f => f.client).filter(Boolean))].sort();
+  allClients.forEach(c => { selC.innerHTML += `<option value="${c}"${c === currentFilter ? ' selected' : ''}>${c}</option>`; });
+
+  // Filter by client
+  const fc = selC.value;
+  const filtered = fc === "Tous" ? frais : frais.filter(f => f.client === fc);
+
+  const repas = filtered.filter(f => f.type === "Repas");
   const nbRepas = repas.length;
-  const totalRepas = repas.reduce((s, f) => s + f.montant, 0);
-  const totalForfait = nbRepas * FORFAIT;
-  const marge = totalForfait - totalRepas;
-  const totalGeneral = frais.reduce((s, f) => s + f.montant, 0);
+  const totalDepRepas = repas.reduce((s, f) => s + (f.montant || 0), 0);
+  const totalRecRepas = repas.reduce((s, f) => s + (f.recettes || 0), 0);
+  const margeRepas = totalRecRepas - totalDepRepas;
+
+  const totalDep = filtered.reduce((s, f) => s + (f.montant || 0), 0);
+  const totalRec = filtered.reduce((s, f) => s + (f.recettes || 0), 0);
+  const soldeGlobal = totalRec - totalDep;
+
+  document.getElementById("s-summary").textContent = `${filtered.length} frais${fc !== "Tous" ? " pour " + fc : ""}`;
 
   const parType = {};
   Object.keys(TYPES).forEach(t => {
-    parType[t] = frais.filter(f => f.type === t).reduce((s, f) => s + f.montant, 0);
+    parType[t] = filtered.filter(f => f.type === t).reduce((s, f) => s + (f.montant || 0), 0);
   });
   const maxType = Math.max(...Object.values(parType), 1);
 
+  // Top 10 clients by spending
   const parClient = {};
-  clients.forEach(c => {
-    parClient[c] = frais.filter(f => f.client === c).reduce((s, f) => s + f.montant, 0);
+  allClients.forEach(c => {
+    parClient[c] = frais.filter(f => f.client === c).reduce((s, f) => s + (f.montant || 0), 0);
   });
-  const activeClients = clients.filter(c => parClient[c] > 0);
-  const maxClient = Math.max(...Object.values(parClient), 1);
-  const clientColors = ["#E8913A", "#5B8DEF", "#8B7EC8", "#6BA89C", "#E06060", "#F2C744", "#C27B5A"];
+  const topClients = Object.entries(parClient)
+    .filter(([_, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+  const maxClient = topClients.length > 0 ? topClients[0][1] : 1;
+  const clientColors = ["#E8913A", "#5B8DEF", "#8B7EC8", "#6BA89C", "#E06060", "#F2C744", "#C27B5A", "#4A90D9", "#9B9B9B", "#D47B20"];
 
   const el = document.getElementById("stats-content");
   el.innerHTML = `
@@ -804,21 +833,27 @@ function renderStats() {
       <div class="stat-card"><div class="blob" style="background:#E8913A"></div>
         <div class="card-label">Repas déclarés</div><div class="card-value">${nbRepas}</div></div>
       <div class="stat-card"><div class="blob" style="background:#E06060"></div>
-        <div class="card-label">Total repas réel</div><div class="card-value">${fmtEuro(totalRepas)}</div></div>
+        <div class="card-label">Dépenses repas</div><div class="card-value">${fmtEuro(totalDepRepas)}</div></div>
       <div class="stat-card"><div class="blob" style="background:#5B8DEF"></div>
-        <div class="card-label">Total forfait</div><div class="card-value">${fmtEuro(totalForfait)}</div>
-        <div class="card-sub">${nbRepas} × ${FORFAIT.toFixed(2)} €</div></div>
-      <div class="stat-card"><div class="blob" style="background:${marge >= 0 ? '#2ECC71' : '#E06060'}"></div>
-        <div class="card-label">Marge repas</div><div class="card-value">${fmtEuro(marge)}</div>
-        <div class="card-sub">${marge >= 0 ? "Économie réalisée" : "Dépassement"}</div></div>
+        <div class="card-label">Recettes repas</div><div class="card-value">${fmtEuro(totalRecRepas)}</div>
+        <div class="card-sub">Forfaits perçus</div></div>
+      <div class="stat-card"><div class="blob" style="background:${margeRepas >= 0 ? '#2ECC71' : '#E06060'}"></div>
+        <div class="card-label">Marge repas</div><div class="card-value">${fmtEuro(margeRepas)}</div>
+        <div class="card-sub">${margeRepas >= 0 ? "Économie réalisée" : "Dépassement"}</div></div>
     </div>
     <div class="stat-cards" style="margin-top:14px">
-      <div class="stat-card"><div class="blob" style="background:var(--accent2)"></div>
-        <div class="card-label">Total général (tous types)</div><div class="card-value">${fmtEuro(totalGeneral)}</div>
-        <div class="card-sub">${frais.length} frais enregistrés</div></div>
+      <div class="stat-card"><div class="blob" style="background:var(--danger)"></div>
+        <div class="card-label">Total dépenses</div><div class="card-value">${fmtEuro(totalDep)}</div>
+        <div class="card-sub">${filtered.length} frais enregistrés</div></div>
+      <div class="stat-card"><div class="blob" style="background:var(--success)"></div>
+        <div class="card-label">Total recettes</div><div class="card-value">${fmtEuro(totalRec)}</div>
+        <div class="card-sub">Forfaits + remboursements</div></div>
+      <div class="stat-card"><div class="blob" style="background:${soldeGlobal >= 0 ? '#2ECC71' : '#E06060'}"></div>
+        <div class="card-label">Solde global</div><div class="card-value" style="color:${soldeGlobal >= 0 ? 'var(--success)' : 'var(--danger)'}">${fmtEuro(soldeGlobal)}</div>
+        <div class="card-sub">${soldeGlobal >= 0 ? "Bénéfice net" : "Perte nette"}</div></div>
     </div>
     <div class="chart-box">
-      <div class="chart-title">Répartition par type</div>
+      <div class="chart-title">Dépenses par type</div>
       <div class="bar-chart">
         ${Object.entries(TYPES).map(([t, { color }]) => {
           const v = parType[t] || 0;
@@ -831,20 +866,22 @@ function renderStats() {
         }).join("")}
       </div>
     </div>
-    ${activeClients.length > 0 ? `
+    ${topClients.length > 0 ? `
     <div class="chart-box">
-      <div class="chart-title">Répartition par client</div>
-      <div class="bar-chart">
-        ${activeClients.map((c, i) => {
-          const v = parClient[c];
-          const h = maxClient > 0 ? (v / maxClient) * 100 : 0;
-          return `<div class="bar-col">
-            <span class="bar-val">${fmtEuro(v)}</span>
-            <div class="bar-fill" style="height:${Math.max(h, 2)}%;background:${clientColors[i % 7]}"></div>
-            <span class="bar-label">${c.length > 12 ? c.slice(0, 11) + "…" : c}</span>
-          </div>`;
-        }).join("")}
-      </div>
+      <div class="chart-title">Top 10 clients (dépenses)</div>
+      ${topClients.map(([c, v], i) => {
+        const pct = maxClient > 0 ? (v / maxClient) * 100 : 0;
+        const nbFrais = frais.filter(f => f.client === c).length;
+        const color = clientColors[i % clientColors.length];
+        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div style="width:120px;flex-shrink:0;font-size:12px;font-weight:600;color:var(--text);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c}">${c}</div>
+          <div style="flex:1;height:20px;background:var(--border);border-radius:6px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${color};border-radius:6px;transition:width .4s"></div>
+          </div>
+          <div style="width:90px;flex-shrink:0;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);text-align:right">${fmtEuro(v)}</div>
+          <div style="width:40px;flex-shrink:0;font-size:10px;color:var(--text-muted)">${nbFrais}×</div>
+        </div>`;
+      }).join("")}
     </div>` : ""}
   `;
 }
@@ -880,6 +917,102 @@ function deleteClient(name) {
   showToast(`Client « ${name} » supprimé`);
 }
 
+// ─── LOAD FROM AIRTABLE ───
+async function loadFromAirtable() {
+  if (!airtableConfig.apiKey || !airtableConfig.baseId || !airtableConfig.tableName) {
+    showToast("Configurez Airtable d'abord (⚙️)", true);
+    return;
+  }
+  const syncBtn = document.getElementById("sync-btn");
+  syncBtn.textContent = "⏳";
+  syncBtn.style.pointerEvents = "none";
+  showToast("Chargement depuis Airtable...");
+
+  let allRecords = [];
+  let offset = null;
+
+  try {
+    // Paginated fetch - Airtable returns max 100 records per page
+    do {
+      let url = `https://api.airtable.com/v0/${airtableConfig.baseId}/${encodeURIComponent(airtableConfig.tableName)}?pageSize=100`;
+      if (offset) url += `&offset=${encodeURIComponent(offset)}`;
+
+      const res = await fetch(url, {
+        headers: { "Authorization": "Bearer " + airtableConfig.apiKey },
+      });
+
+      if (!res.ok) {
+        let errMsg = `HTTP ${res.status}`;
+        try { const ed = await res.json(); if (ed?.error?.message) errMsg = ed.error.message; } catch(_){}
+        throw new Error(errMsg);
+      }
+
+      const data = await res.json();
+      allRecords = allRecords.concat(data.records || []);
+      offset = data.offset || null;
+    } while (offset);
+
+    // Map Airtable records to local format
+    // Airtable REST API returns fields by NAME, not by ID
+    const airtableFrais = allRecords.map(r => {
+      const f = r.fields || {};
+      // Try field names first (REST API), then field IDs (fallback)
+      const date = f["Date"] || f["fldCEksLmYCG17KgY"] || "";
+      const client = f["Client"] || f["fld7jOxDQI6hQBkcJ"] || "";
+      const categorie = f["Catégorie"] || f["fldQP99LRs06cN36y"] || "";
+      const libelle = f["Libellé"] || f["fldnG6c7WcL9kAuZF"] || "";
+      const moment = f["Moment"] || f["fldsULm9kM0fCunhk"] || "";
+      const depenses = f["Dépenses"] || f["fldKUFXVX1v791wnd"];
+      const recettes = f["Recettes"] || f["fldiZlKerKrJw2MyC"];
+      const notes = f["Notes"] || f["fldUfJi8CJaILUrUL"] || "";
+
+      return {
+        id: r.id,
+        airtableId: r.id,
+        date: date,
+        client: client,
+        type: categorie || libelle || "Divers",
+        libelle: libelle,
+        montant: parseFloat(depenses || 0),
+        recettes: parseFloat(recettes || 0),
+        moment: typeof moment === 'string' ? moment.trim() : "",
+        description: typeof notes === 'string' ? notes.trim() : "",
+      };
+    }).filter(f => f.date);
+
+    // Sort by date descending
+    airtableFrais.sort((a, b) => b.date.localeCompare(a.date));
+
+    // Replace local frais with Airtable data
+    frais = airtableFrais;
+    save();
+
+    // Extract unique clients from Airtable
+    const airtableClients = [...new Set(airtableFrais.map(f => f.client).filter(Boolean))];
+    // Merge with existing clients
+    airtableClients.forEach(c => {
+      if (!clients.includes(c)) clients.push(c);
+    });
+    clients.sort();
+    save();
+
+    populateClientSelect("f-client");
+    initHistoriqueFilters();
+    renderQuickStats();
+
+    airtableConnected = true;
+    updateAirtableBadge();
+    showToast(`✅ ${airtableFrais.length} frais chargés depuis Airtable !`);
+
+  } catch (e) {
+    showToast("Erreur Airtable : " + (e.message || e), true);
+    console.error("Airtable load error:", e);
+  } finally {
+    syncBtn.textContent = "🔄";
+    syncBtn.style.pointerEvents = "auto";
+  }
+}
+
 // ─── INIT ───
 document.getElementById("f-date").value = new Date().toISOString().split("T")[0];
 populateClientSelect("f-client");
@@ -901,6 +1034,11 @@ document.getElementById("f-recettes").addEventListener("input", updateMarge);
 document.getElementById("mc-name").addEventListener("keydown", e => { if (e.key === "Enter") addClientFromModal(); });
 document.getElementById("f-montant").addEventListener("keydown", e => { if (e.key === "Enter") submitFrais(); });
 document.getElementById("f-desc").addEventListener("keydown", e => { if (e.key === "Enter") submitFrais(); });
+
+// Auto-load from Airtable on startup if configured
+if (airtableConfig.apiKey && airtableConfig.baseId && airtableConfig.tableName) {
+  setTimeout(() => loadFromAirtable(), 500);
+}
 </script>
 
 </body>
