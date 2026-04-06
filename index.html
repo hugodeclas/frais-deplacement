@@ -767,11 +767,39 @@ function renderHistorique() {
   }).join("");
 }
 
-function deleteFrais(id) {
+async function deleteFrais(id) {
+  if (!confirm("Supprimer ce frais ?")) return;
+
+  // Check if this is an Airtable record (id starts with "rec")
+  const isAirtable = id.startsWith("rec") && airtableConfig.apiKey && airtableConfig.baseId && airtableConfig.tableName;
+
+  // Remove locally
   frais = frais.filter(f => f.id !== id);
   save();
   renderHistorique();
-  showToast("Frais supprimé");
+  renderQuickStats();
+
+  // Delete from Airtable
+  if (isAirtable) {
+    try {
+      const url = `https://api.airtable.com/v0/${airtableConfig.baseId}/${encodeURIComponent(airtableConfig.tableName)}/${id}`;
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: { "Authorization": "Bearer " + airtableConfig.apiKey },
+      });
+      if (res.ok) {
+        showToast("✅ Supprimé localement + Airtable");
+      } else {
+        let errMsg = `HTTP ${res.status}`;
+        try { const ed = await res.json(); if (ed?.error?.message) errMsg = ed.error.message; } catch(_){}
+        showToast("Supprimé localement, erreur Airtable : " + errMsg, true);
+      }
+    } catch (e) {
+      showToast("Supprimé localement, erreur réseau Airtable", true);
+    }
+  } else {
+    showToast("Frais supprimé");
+  }
 }
 
 function initHistoriqueFilters() {
