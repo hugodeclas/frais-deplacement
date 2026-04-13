@@ -256,10 +256,27 @@ main { max-width: 960px; margin: 0 auto; padding: 28px 24px 60px; }
 
 <!-- ═══ STATISTIQUES ═══ -->
 <section id="tab-stats" class="tab-content">
-  <div class="filters" style="margin-bottom:16px">
+  <div class="filters" style="margin-bottom:16px;flex-wrap:wrap">
     <select id="s-filter-client" class="input" style="width:auto;min-width:180px" onchange="renderStats()">
       <option value="Tous">Tous les clients</option>
     </select>
+    <select id="s-filter-period" class="input" style="width:auto;min-width:180px" onchange="renderStats()">
+      <option value="all">Toute la période</option>
+      <option value="thisWeek">Cette semaine</option>
+      <option value="lastWeek">La semaine dernière</option>
+      <option value="thisMonth">Ce mois-ci</option>
+      <option value="lastMonth">Le mois dernier</option>
+      <option value="last3Months">3 derniers mois</option>
+      <option value="last6Months">6 derniers mois</option>
+      <option value="thisYear">Cette année</option>
+      <option value="lastYear">L'année dernière</option>
+      <option value="custom">Période personnalisée</option>
+    </select>
+    <div id="s-custom-dates" style="display:none;gap:8px;align-items:center">
+      <input type="date" id="s-date-from" class="input" style="width:auto" onchange="renderStats()">
+      <span style="color:var(--text-muted);font-size:13px">→</span>
+      <input type="date" id="s-date-to" class="input" style="width:auto" onchange="renderStats()">
+    </div>
     <div class="filter-summary" id="s-summary"></div>
   </div>
   <div id="stats-content"></div>
@@ -812,6 +829,55 @@ function initHistoriqueFilters() {
   Object.keys(TYPES).forEach(t => { selT.innerHTML += `<option value="${t}">${t}</option>`; });
 }
 
+// ─── DATE PERIOD HELPER ───
+function getDateRange(period) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayOfWeek = today.getDay() === 0 ? 7 : today.getDay(); // Monday=1, Sunday=7
+
+  let from = null, to = null;
+
+  switch(period) {
+    case "thisWeek":
+      from = new Date(today); from.setDate(today.getDate() - dayOfWeek + 1);
+      to = new Date(today);
+      break;
+    case "lastWeek":
+      from = new Date(today); from.setDate(today.getDate() - dayOfWeek - 6);
+      to = new Date(today); to.setDate(today.getDate() - dayOfWeek);
+      break;
+    case "thisMonth":
+      from = new Date(today.getFullYear(), today.getMonth(), 1);
+      to = new Date(today);
+      break;
+    case "lastMonth":
+      from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      to = new Date(today.getFullYear(), today.getMonth(), 0);
+      break;
+    case "last3Months":
+      from = new Date(today); from.setMonth(today.getMonth() - 3);
+      to = new Date(today);
+      break;
+    case "last6Months":
+      from = new Date(today); from.setMonth(today.getMonth() - 6);
+      to = new Date(today);
+      break;
+    case "thisYear":
+      from = new Date(today.getFullYear(), 0, 1);
+      to = new Date(today);
+      break;
+    case "lastYear":
+      from = new Date(today.getFullYear() - 1, 0, 1);
+      to = new Date(today.getFullYear() - 1, 11, 31);
+      break;
+    default:
+      return { from: null, to: null };
+  }
+  // Format as YYYY-MM-DD
+  const fmt = d => d.toISOString().split("T")[0];
+  return { from: fmt(from), to: fmt(to) };
+}
+
 // ─── STATS ───
 function renderStats() {
   // Populate client filter
@@ -821,9 +887,42 @@ function renderStats() {
   const allClients = [...new Set(frais.map(f => f.client).filter(Boolean))].sort();
   allClients.forEach(c => { selC.innerHTML += `<option value="${c}"${c === currentFilter ? ' selected' : ''}>${c}</option>`; });
 
+  // Handle period filter
+  const periodSel = document.getElementById("s-filter-period");
+  const customDiv = document.getElementById("s-custom-dates");
+  if (periodSel.value === "custom") {
+    customDiv.style.display = "flex";
+  } else {
+    customDiv.style.display = "none";
+  }
+
+  // Determine date range
+  let dateFrom = null, dateTo = null;
+  if (periodSel.value === "custom") {
+    dateFrom = document.getElementById("s-date-from").value || null;
+    dateTo = document.getElementById("s-date-to").value || null;
+  } else if (periodSel.value !== "all") {
+    const range = getDateRange(periodSel.value);
+    dateFrom = range.from;
+    dateTo = range.to;
+  }
+
   // Filter by client
   const fc = selC.value;
-  const filtered = fc === "Tous" ? frais : frais.filter(f => f.client === fc);
+  let filtered = fc === "Tous" ? [...frais] : frais.filter(f => f.client === fc);
+
+  // Filter by date
+  if (dateFrom) filtered = filtered.filter(f => f.date >= dateFrom);
+  if (dateTo) filtered = filtered.filter(f => f.date <= dateTo);
+
+  // Period label for summary
+  const periodLabels = {
+    "all": "Toute la période", "thisWeek": "Cette semaine", "lastWeek": "Semaine dernière",
+    "thisMonth": "Ce mois-ci", "lastMonth": "Mois dernier", "last3Months": "3 derniers mois",
+    "last6Months": "6 derniers mois", "thisYear": "Cette année", "lastYear": "Année dernière",
+    "custom": dateFrom && dateTo ? `${fmtDate(dateFrom)} → ${fmtDate(dateTo)}` : "Personnalisé"
+  };
+  const periodLabel = periodLabels[periodSel.value] || "";
 
   const repas = filtered.filter(f => f.type === "Repas");
   const nbRepas = repas.length;
@@ -835,7 +934,7 @@ function renderStats() {
   const totalRec = filtered.reduce((s, f) => s + (f.recettes || 0), 0);
   const soldeGlobal = totalRec - totalDep;
 
-  document.getElementById("s-summary").textContent = `${filtered.length} frais${fc !== "Tous" ? " pour " + fc : ""}`;
+  document.getElementById("s-summary").textContent = `${filtered.length} frais · ${periodLabel}${fc !== "Tous" ? " · " + fc : ""}`;
 
   const parType = {};
   Object.keys(TYPES).forEach(t => {
