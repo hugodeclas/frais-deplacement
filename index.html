@@ -835,20 +835,28 @@ function getDateRange(period) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dayOfWeek = today.getDay() === 0 ? 7 : today.getDay(); // Monday=1, Sunday=7
 
+  // Local date formatter (avoids UTC shift from toISOString)
+  const fmt = d => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  };
+
   let from = null, to = null;
 
   switch(period) {
     case "thisWeek":
-      from = new Date(today); from.setDate(today.getDate() - dayOfWeek + 1);
-      to = new Date(today);
+      from = new Date(today); from.setDate(today.getDate() - dayOfWeek + 1); // Monday
+      to = new Date(today); to.setDate(today.getDate() + (7 - dayOfWeek)); // Sunday
       break;
     case "lastWeek":
-      from = new Date(today); from.setDate(today.getDate() - dayOfWeek - 6);
-      to = new Date(today); to.setDate(today.getDate() - dayOfWeek);
+      from = new Date(today); from.setDate(today.getDate() - dayOfWeek - 6); // Previous Monday
+      to = new Date(today); to.setDate(today.getDate() - dayOfWeek); // Previous Sunday
       break;
     case "thisMonth":
       from = new Date(today.getFullYear(), today.getMonth(), 1);
-      to = new Date(today);
+      to = new Date(today.getFullYear(), today.getMonth() + 1, 0); // Last day of month
       break;
     case "lastMonth":
       from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
@@ -864,7 +872,7 @@ function getDateRange(period) {
       break;
     case "thisYear":
       from = new Date(today.getFullYear(), 0, 1);
-      to = new Date(today);
+      to = new Date(today.getFullYear(), 11, 31);
       break;
     case "lastYear":
       from = new Date(today.getFullYear() - 1, 0, 1);
@@ -873,8 +881,6 @@ function getDateRange(period) {
     default:
       return { from: null, to: null };
   }
-  // Format as YYYY-MM-DD
-  const fmt = d => d.toISOString().split("T")[0];
   return { from: fmt(from), to: fmt(to) };
 }
 
@@ -916,13 +922,10 @@ function renderStats() {
   if (dateTo) filtered = filtered.filter(f => f.date <= dateTo);
 
   // Period label for summary
-  const periodLabels = {
-    "all": "Toute la période", "thisWeek": "Cette semaine", "lastWeek": "Semaine dernière",
-    "thisMonth": "Ce mois-ci", "lastMonth": "Mois dernier", "last3Months": "3 derniers mois",
-    "last6Months": "6 derniers mois", "thisYear": "Cette année", "lastYear": "Année dernière",
-    "custom": dateFrom && dateTo ? `${fmtDate(dateFrom)} → ${fmtDate(dateTo)}` : "Personnalisé"
-  };
-  const periodLabel = periodLabels[periodSel.value] || "";
+  let periodInfo = "";
+  if (dateFrom && dateTo) {
+    periodInfo = ` · ${fmtDate(dateFrom)} → ${fmtDate(dateTo)}`;
+  }
 
   const repas = filtered.filter(f => f.type === "Repas");
   const nbRepas = repas.length;
@@ -934,7 +937,7 @@ function renderStats() {
   const totalRec = filtered.reduce((s, f) => s + (f.recettes || 0), 0);
   const soldeGlobal = totalRec - totalDep;
 
-  document.getElementById("s-summary").textContent = `${filtered.length} frais · ${periodLabel}${fc !== "Tous" ? " · " + fc : ""}`;
+  document.getElementById("s-summary").textContent = `${filtered.length} frais${fc !== "Tous" ? " · " + fc : ""}${periodInfo}`;
 
   const parType = {};
   Object.keys(TYPES).forEach(t => {
