@@ -512,7 +512,7 @@ async function testAirtable() {
               <u>Vérifiez le nom de la table :</u> le nom exact qui apparaît sur l'onglet dans Airtable (majuscules, accents et espaces comptent).<br>
               Vous avez saisi : Base = <code>${base}</code>, Table = <code>${table}</code>`,
         422: `<b>Requête invalide.</b><br>
-              Vérifiez que les noms de colonnes dans Airtable correspondent : Date, Client, Type, Montant, Description.`,
+              Vérifiez que les noms de colonnes dans Airtable correspondent : Date, Client, Catégorie, Libellé, Dépenses, Recettes, Notes.`,
         429: `<b>Trop de requêtes.</b> Attendez quelques secondes et réessayez.`,
         500: `<b>Erreur serveur Airtable.</b> Réessayez dans quelques instants.`,
       };
@@ -537,7 +537,7 @@ async function testAirtable() {
       if (fieldNames.length > 0) {
         details += `<br><span style="font-size:10px;color:var(--text-muted)">Colonnes détectées : ${fieldNames.join(", ")}</span>`;
         // Check expected columns
-        const expected = ["Date", "Client", "Type", "Montant", "Description"];
+        const expected = ["Date", "Client", "Catégorie", "Libellé", "Dépenses", "Recettes", "Notes"];
         const missing = expected.filter(e => !fieldNames.some(f => f.toLowerCase() === e.toLowerCase()));
         if (missing.length > 0) {
           details += `<br><span style="color:var(--accent);font-size:11px">⚠ Colonnes manquantes : <b>${missing.join(", ")}</b> — créez-les dans Airtable</span>`;
@@ -945,17 +945,46 @@ function renderStats() {
   });
   const maxType = Math.max(...Object.values(parType), 1);
 
-  // Top 10 clients by spending
-  const parClient = {};
-  allClients.forEach(c => {
-    parClient[c] = frais.filter(f => f.client === c).reduce((s, f) => s + (f.montant || 0), 0);
+  // Top 10 clients by spending, recettes, marge (using filtered data)
+  const clientData = {};
+  const filteredClients = [...new Set(filtered.map(f => f.client).filter(Boolean))];
+  filteredClients.forEach(c => {
+    const cf = filtered.filter(f => f.client === c);
+    clientData[c] = {
+      dep: cf.reduce((s, f) => s + (f.montant || 0), 0),
+      rec: cf.reduce((s, f) => s + (f.recettes || 0), 0),
+      nb: cf.length,
+    };
+    clientData[c].marge = clientData[c].rec - clientData[c].dep;
   });
-  const topClients = Object.entries(parClient)
-    .filter(([_, v]) => v > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10);
-  const maxClient = topClients.length > 0 ? topClients[0][1] : 1;
+
+  const topDep = Object.entries(clientData).filter(([_,d]) => d.dep > 0).sort((a,b) => b[1].dep - a[1].dep).slice(0,10);
+  const topRec = Object.entries(clientData).filter(([_,d]) => d.rec > 0).sort((a,b) => b[1].rec - a[1].rec).slice(0,10);
+  const topMarge = Object.entries(clientData).filter(([_,d]) => d.marge !== 0).sort((a,b) => b[1].marge - a[1].marge).slice(0,10);
+
   const clientColors = ["#E8913A", "#5B8DEF", "#8B7EC8", "#6BA89C", "#E06060", "#F2C744", "#C27B5A", "#4A90D9", "#9B9B9B", "#D47B20"];
+
+  function renderTop10(list, valueKey, title, colorPositive, colorNegative) {
+    if (list.length === 0) return "";
+    const maxVal = Math.max(...list.map(([_,d]) => Math.abs(d[valueKey])), 1);
+    return `<div class="chart-box">
+      <div class="chart-title">${title}</div>
+      ${list.map(([c, d], i) => {
+        const v = d[valueKey];
+        const pct = maxVal > 0 ? (Math.abs(v) / maxVal) * 100 : 0;
+        const isPos = v >= 0;
+        const color = isPos ? (colorPositive || clientColors[i % clientColors.length]) : (colorNegative || "var(--danger)");
+        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <div style="width:120px;flex-shrink:0;font-size:12px;font-weight:600;color:var(--text);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c}">${c}</div>
+          <div style="flex:1;height:20px;background:var(--border);border-radius:6px;overflow:hidden">
+            <div style="height:100%;width:${pct}%;background:${color};border-radius:6px;transition:width .4s"></div>
+          </div>
+          <div style="width:100px;flex-shrink:0;font-size:11px;font-family:'JetBrains Mono',monospace;color:${isPos ? 'var(--success)' : 'var(--danger)'};text-align:right;font-weight:600">${isPos ? "+" : ""}${fmtEuro(v)}</div>
+          <div style="width:35px;flex-shrink:0;font-size:10px;color:var(--text-muted)">${d.nb}×</div>
+        </div>`;
+      }).join("")}
+    </div>`;
+  }
 
   const el = document.getElementById("stats-content");
   el.innerHTML = `
@@ -996,23 +1025,9 @@ function renderStats() {
         }).join("")}
       </div>
     </div>
-    ${topClients.length > 0 ? `
-    <div class="chart-box">
-      <div class="chart-title">Top 10 clients (dépenses)</div>
-      ${topClients.map(([c, v], i) => {
-        const pct = maxClient > 0 ? (v / maxClient) * 100 : 0;
-        const nbFrais = frais.filter(f => f.client === c).length;
-        const color = clientColors[i % clientColors.length];
-        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-          <div style="width:120px;flex-shrink:0;font-size:12px;font-weight:600;color:var(--text);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c}">${c}</div>
-          <div style="flex:1;height:20px;background:var(--border);border-radius:6px;overflow:hidden">
-            <div style="height:100%;width:${pct}%;background:${color};border-radius:6px;transition:width .4s"></div>
-          </div>
-          <div style="width:90px;flex-shrink:0;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text-muted);text-align:right">${fmtEuro(v)}</div>
-          <div style="width:40px;flex-shrink:0;font-size:10px;color:var(--text-muted)">${nbFrais}×</div>
-        </div>`;
-      }).join("")}
-    </div>` : ""}
+    ${renderTop10(topMarge, "marge", "🏆 Top 10 clients — Marge (recettes − dépenses)", "#2ECC71", "#E06060")}
+    ${renderTop10(topRec, "rec", "💰 Top 10 clients — Recettes", "#2ECC71", null)}
+    ${renderTop10(topDep, "dep", "📊 Top 10 clients — Dépenses", null, null)}
   `;
 }
 
