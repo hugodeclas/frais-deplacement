@@ -928,7 +928,21 @@ function renderStats() {
   }
 
   const repas = filtered.filter(f => f.type === "Repas");
-  const nbRepas = repas.length;
+
+  // Count meals: Journée = 2, Midi/Soir = 1, or deduce from recettes
+  function countMeals(f) {
+    const m = (f.moment || "").trim().toLowerCase();
+    if (m === "journée" || m === "journee") return 2;
+    if (m === "midi" || m === "soir") return 1;
+    // Fallback: deduce from recettes amount
+    const rec = f.recettes || 0;
+    if (rec >= 35) return 2;  // ~42.80 = journée
+    if (rec > 0) return 1;    // ~21.10/21.40 = midi ou soir
+    return 1; // Default: 1 repas si pas d'info
+  }
+
+  const nbRepas = repas.reduce((s, f) => s + countMeals(f), 0);
+  const nbLignesRepas = repas.length;
   const totalDepRepas = repas.reduce((s, f) => s + (f.montant || 0), 0);
   const totalRecRepas = repas.reduce((s, f) => s + (f.recettes || 0), 0);
   const margeRepas = totalRecRepas - totalDepRepas;
@@ -990,7 +1004,8 @@ function renderStats() {
   el.innerHTML = `
     <div class="stat-cards">
       <div class="stat-card"><div class="blob" style="background:#E8913A"></div>
-        <div class="card-label">Repas déclarés</div><div class="card-value">${nbRepas}</div></div>
+        <div class="card-label">Repas comptés</div><div class="card-value">${nbRepas}</div>
+        <div class="card-sub">${nbLignesRepas} ligne${nbLignesRepas > 1 ? "s" : ""} (journée = 2 repas)</div></div>
       <div class="stat-card"><div class="blob" style="background:#E06060"></div>
         <div class="card-label">Dépenses repas</div><div class="card-value">${fmtEuro(totalDepRepas)}</div></div>
       <div class="stat-card"><div class="blob" style="background:#5B8DEF"></div>
