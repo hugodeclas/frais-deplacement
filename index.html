@@ -929,7 +929,9 @@ function renderStats() {
 
   const repas = filtered.filter(f => f.type === "Repas");
 
-  // Count meals: Journée = 2, Midi/Soir = 1, or deduce from recettes
+  // Count meals: only when a forfait is declared (Moment or Recettes present)
+  // Journée = 2 repas, Midi/Soir = 1 repas
+  // No forfait (no Moment, no Recettes) = 0 repas counted
   function countMeals(f) {
     const m = (f.moment || "").trim().toLowerCase();
     if (m === "journée" || m === "journee") return 2;
@@ -938,11 +940,12 @@ function renderStats() {
     const rec = f.recettes || 0;
     if (rec >= 35) return 2;  // ~42.80 = journée
     if (rec > 0) return 1;    // ~21.10/21.40 = midi ou soir
-    return 1; // Default: 1 repas si pas d'info
+    return 0; // Pas de forfait déclaré = pas un repas au forfait
   }
 
   const nbRepas = repas.reduce((s, f) => s + countMeals(f), 0);
   const nbLignesRepas = repas.length;
+  const nbSansForfait = repas.filter(f => countMeals(f) === 0).length;
   const totalDepRepas = repas.reduce((s, f) => s + (f.montant || 0), 0);
   const totalRecRepas = repas.reduce((s, f) => s + (f.recettes || 0), 0);
   const margeRepas = totalRecRepas - totalDepRepas;
@@ -1004,8 +1007,8 @@ function renderStats() {
   el.innerHTML = `
     <div class="stat-cards">
       <div class="stat-card"><div class="blob" style="background:#E8913A"></div>
-        <div class="card-label">Repas comptés</div><div class="card-value">${nbRepas}</div>
-        <div class="card-sub">${nbLignesRepas} ligne${nbLignesRepas > 1 ? "s" : ""} (journée = 2 repas)</div></div>
+        <div class="card-label">Repas au forfait</div><div class="card-value">${nbRepas}</div>
+        <div class="card-sub">${nbLignesRepas} ligne${nbLignesRepas > 1 ? "s" : ""} repas${nbSansForfait > 0 ? ` · ${nbSansForfait} sans forfait` : ""}</div></div>
       <div class="stat-card"><div class="blob" style="background:#E06060"></div>
         <div class="card-label">Dépenses repas</div><div class="card-value">${fmtEuro(totalDepRepas)}</div></div>
       <div class="stat-card"><div class="blob" style="background:#5B8DEF"></div>
